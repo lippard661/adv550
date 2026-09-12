@@ -1,0 +1,466 @@
+/* ==================================================================== *
+ * unix_patch                                                           *
+ *                                                                      *
+ *     unix_patch  old_file  patch_file  {-output_file path | -of path} *
+ *                                                                      *
+ * Applies a single unified-diff patch -- the kind produced by          *
+ *                                                                      *
+ *     diff -u  old_file  new_file  >patch_file                         *
+ *                                                                      *
+ * -- to old_file, reconstructing new_file.  With -output_file (-of)    *
+ * the result is written to the named segment; otherwise it is printed  *
+ * on standard output with ioa_.                                        *
+ *                                                                      *
+ * Supported subset:                                                    *
+ *   - the "--- / +++" file header is skipped;                          *
+ *   - every "@@ -l,s +l,s @@" hunk is applied at the old line number   *
+ *     it names, with all context (' ') and deletion ('-') lines        *
+ *     verified against old_file (a mismatch aborts with "Hunk n ..."); *
+ *   - "\ No newline at end of file" is honoured;                       *
+ *   - lines outside any hunk are copied through unchanged.             *
+ *                                                                      *
+ * Not implemented (not needed for a clean single-file diff -u):        *
+ *   fuzzy/offset matching, reversed patches, multi-file patches,       *
+ *   and ed/context (non-unified) formats.                              *
+ *                                                                      *
+ * The patched text is built in a temporary segment first, so a failed  *
+ * match never leaves a partial output file behind.                     *
+ * ==================================================================== */
+
+/* Written 12 September 2026 by Claude Opus 4.8 at the direction of
+   Jim Lippard. Minimal implementation to patch from output of
+   diff -u oldfile newfile >changes.diff
+   using oldfile and changes.diff, for a single file.
+   Usage: unix_patch oldfile changes.diff [-output_file/-of newfile]
+   will just print to the terminal if -of is not supplied. */
+
+unix_patch:
+   proc options (main);
+
+   /* ---- hardcore gate entries ---------------------------------------- */
+   dcl hcs_$initiate_count    entry (char(*), char(*), char(*), fixed bin(24), fixed bin(2), ptr, fixed bin(35));
+   dcl hcs_$make_seg          entry (char(*), char(*), char(*), fixed bin(5), ptr, fixed bin(35));
+   dcl hcs_$set_bc_seg        entry (ptr, fixed bin(24), fixed bin(35));
+   dcl hcs_$truncate_seg      entry (ptr, fixed bin(24), fixed bin(35));
+   dcl hcs_$terminate_noname  entry (ptr, fixed bin(35));
+
+   /* ---- command / utility entries ------------------------------------ */
+   dcl cu_$arg_count          entry (fixed bin, fixed bin(35));
+   dcl cu_$arg_ptr            entry (fixed bin, ptr, fixed bin(21), fixed bin(35));
+   dcl expand_path_           entry (ptr, fixed bin(21), ptr, ptr, fixed bin(35));
+   dcl com_err_               entry options (variable);
+   dcl ioa_$nnl               entry options (variable);
+   dcl get_temp_segments_     entry (char(*), (*) ptr, fixed bin(35));
+   dcl release_temp_segments_ entry (char(*), (*) ptr, fixed bin(35));
+
+   /* ---- builtins ----------------------------------------------------- */
+   dcl (addr, byte, divide, index, length, null, rtrim, substr) builtin;
+
+   /* ---- resolved paths ----------------------------------------------- */
+   dcl (old_dir, pat_dir, of_dir) char (168);
+   dcl (old_ent, pat_ent, of_ent) char (32);
+
+   /* ---- argument scanning -------------------------------------------- */
+   dcl (nargs, i)                 fixed bin;
+   dcl code                       fixed bin (35);
+   dcl argp                       ptr;
+   dcl argl                       fixed bin (21);
+   dcl arg_str                    char (argl) based (argp);
+   dcl (old_argp, pat_argp, of_argp) ptr;
+   dcl (old_argl, pat_argl, of_argl) fixed bin (21);
+   dcl (old_seen, pat_seen, have_of, temp_gotten) bit (1);
+
+   /* ---- segments ----------------------------------------------------- */
+   dcl (old_ptr, pat_ptr, out_ptr, tgt_ptr) ptr;
+   dcl (old_len, pat_len, out_len)          fixed bin (24);
+   dcl old_buf char (old_len) based (old_ptr);
+   dcl pat_buf char (pat_len) based (pat_ptr);
+   dcl out_buf char (OUT_MAX) based (out_ptr);   /* accumulation buffer   */
+   dcl tgt_seg char (OUT_MAX) based (tgt_ptr);   /* final output segment  */
+   dcl temp_segs (1) ptr;
+
+   /* ---- apply state -------------------------------------------------- */
+   dcl (cur_off, cur_line, hunk_no)        fixed bin (24);
+   dcl (pat_off, pnext, pline_len, oldstart) fixed bin (24);
+   dcl (ptxt_off, ptxt_len, kk)            fixed bin (24);
+   dcl (otl, ofl)                          fixed bin (24);
+   dcl onl                                 bit (1);
+   dcl pm                                  char (1);
+   dcl (in_hunk, scan_more)                bit (1);
+
+   /* ---- constants ---------------------------------------------------- */
+   dcl OUT_MAX   fixed bin (24) int static options (constant) init (1044480);
+   dcl RW_ACCESS fixed bin (5)  int static options (constant) init (01010b);
+   dcl DIGITS    char (10)      int static options (constant) init ("0123456789");
+   dcl USAGE     char (58)      int static options (constant)
+                    init ("Usage: unix_patch old_file patch_file {-output_file path}");
+   dcl NL        char (1);
+
+   /* =================================================================== */
+
+   NL          = byte (10);
+   old_ptr     = null ();
+   pat_ptr     = null ();
+   temp_gotten = "0"b;
+   old_seen    = "0"b;
+   pat_seen    = "0"b;
+   have_of     = "0"b;
+
+   /* ---- parse the command line --------------------------------------- */
+   call cu_$arg_count (nargs, code);
+   if code ^= 0 then do;
+      call com_err_ (code, "unix_patch", "^a", USAGE);
+      go to cleanup;
+   end;
+
+   i = 1;
+   do while (i <= nargs);
+      call cu_$arg_ptr (i, argp, argl, code);
+      if code ^= 0 then do;
+         call com_err_ (code, "unix_patch", "Cannot access argument ^d.", i);
+         go to cleanup;
+      end;
+
+      if substr (arg_str, 1, 1) = "-" then do;
+         if arg_str = "-output_file" | arg_str = "-of" then do;
+            if i >= nargs then do;
+               call com_err_ (0, "unix_patch", "No path after ^a.  ^a", arg_str, USAGE);
+               go to cleanup;
+            end;
+            i = i + 1;
+            call cu_$arg_ptr (i, of_argp, of_argl, code);
+            have_of = "1"b;
+         end;
+         else do;
+            call com_err_ (0, "unix_patch", "Unknown control argument ^a.", arg_str);
+            go to cleanup;
+         end;
+      end;
+      else do;
+         if ^old_seen then do;
+            old_argp = argp;  old_argl = argl;  old_seen = "1"b;
+         end;
+         else if ^pat_seen then do;
+            pat_argp = argp;  pat_argl = argl;  pat_seen = "1"b;
+         end;
+         else do;
+            call com_err_ (0, "unix_patch", "Too many arguments.  ^a", USAGE);
+            go to cleanup;
+         end;
+      end;
+
+      i = i + 1;
+   end;
+
+   if ^old_seen | ^pat_seen then do;
+      call com_err_ (0, "unix_patch", "^a", USAGE);
+      go to cleanup;
+   end;
+
+   /* ---- resolve paths ------------------------------------------------ */
+   call expand_path_ (old_argp, old_argl, addr (old_dir), addr (old_ent), code);
+   if code ^= 0 then do;
+      call com_err_ (code, "unix_patch", "Cannot resolve the old-file path.");
+      go to cleanup;
+   end;
+   call expand_path_ (pat_argp, pat_argl, addr (pat_dir), addr (pat_ent), code);
+   if code ^= 0 then do;
+      call com_err_ (code, "unix_patch", "Cannot resolve the patch-file path.");
+      go to cleanup;
+   end;
+   if have_of then do;
+      call expand_path_ (of_argp, of_argl, addr (of_dir), addr (of_ent), code);
+      if code ^= 0 then do;
+         call com_err_ (code, "unix_patch", "Cannot resolve the output-file path.");
+         go to cleanup;
+      end;
+   end;
+
+   /* ---- map the two inputs into memory ------------------------------- */
+   call hcs_$initiate_count (old_dir, old_ent, "", old_len, 0, old_ptr, code);
+   if old_ptr = null () then do;
+      call com_err_ (code, "unix_patch", "Could not initiate old file ^a>^a",
+         rtrim (old_dir), rtrim (old_ent));
+      go to cleanup;
+   end;
+   old_len = divide (old_len, 9, 24, 0);
+
+   call hcs_$initiate_count (pat_dir, pat_ent, "", pat_len, 0, pat_ptr, code);
+   if pat_ptr = null () then do;
+      call com_err_ (code, "unix_patch", "Could not initiate patch file ^a>^a",
+         rtrim (pat_dir), rtrim (pat_ent));
+      go to cleanup;
+   end;
+   pat_len = divide (pat_len, 9, 24, 0);
+
+   /* ---- scratch segment for the reconstructed text ------------------- */
+   call get_temp_segments_ ("unix_patch", temp_segs, code);
+   if code ^= 0 then do;
+      call com_err_ (code, "unix_patch", "Could not obtain a temporary segment.");
+      go to cleanup;
+   end;
+   temp_gotten = "1"b;
+   out_ptr = temp_segs (1);
+   out_len = 0;
+
+   /* ---- walk the patch, hunk by hunk --------------------------------- */
+   cur_off  = 1;                 /* start of the next unconsumed old line */
+   cur_line = 1;                 /* its 1-based number                    */
+   hunk_no  = 0;
+   pat_off  = 1;
+   in_hunk  = "0"b;
+   scan_more = "1"b;
+
+   do while (pat_off <= pat_len & scan_more);
+
+      /* isolate the current patch line (pline_len excludes the newline) */
+      kk = index (substr (pat_buf, pat_off), NL);
+      if kk = 0 then do;  pline_len = pat_len - pat_off + 1;  pnext = pat_len + 1;  end;
+                else do;  pline_len = kk - 1;                 pnext = pat_off + kk;  end;
+
+      if pline_len >= 2 & substr (pat_buf, pat_off, 2) = "@@" then do;
+         /* -------- hunk header -------- */
+         hunk_no = hunk_no + 1;
+         call parse_oldstart (pat_off, pline_len, oldstart);
+         call advance_old_to (oldstart);      /* copy the gap before the hunk */
+         in_hunk = "1"b;
+      end;
+
+      else if in_hunk then do;
+         /* -------- hunk body -------- */
+         if pline_len = 0 then pm = " ";      /* a blank line is empty context */
+                          else pm = substr (pat_buf, pat_off, 1);
+
+         if pline_len >= 1 then do;  ptxt_off = pat_off + 1;  ptxt_len = pline_len - 1;  end;
+                           else do;  ptxt_off = pat_off;      ptxt_len = 0;              end;
+
+         if pm = " " then do;                 /* context: verify, then copy old */
+            call cur_old_extent (otl, ofl, onl);
+            if ofl = 0 then call short_old;
+            call verify (otl, ptxt_off, ptxt_len);
+            call emit (substr (old_buf, cur_off, ofl));
+            cur_off = cur_off + ofl;  cur_line = cur_line + 1;
+         end;
+
+         else if pm = "-" then do;            /* deletion: verify, then drop */
+            call cur_old_extent (otl, ofl, onl);
+            if ofl = 0 then call short_old;
+            call verify (otl, ptxt_off, ptxt_len);
+            cur_off = cur_off + ofl;  cur_line = cur_line + 1;
+         end;
+
+         else if pm = "+" then do;            /* addition: take from the patch */
+            if ptxt_len > 0 then call emit (substr (pat_buf, ptxt_off, ptxt_len));
+            if peek_char (pnext) ^= "\" then call emit (NL);
+         end;
+
+         else if pm = "\" then ;              /* "No newline" -- acted on above */
+
+         else scan_more = "0"b;               /* anything else ends this patch */
+      end;
+
+      /* else: preamble before the first hunk (--- / +++) -- skip */
+
+      pat_off = pnext;
+   end;
+
+   /* ---- copy whatever old text follows the last hunk ----------------- */
+   call copy_rest_old;
+
+   /* ---- deliver the result ------------------------------------------- */
+   if have_of then call flush_to_file;
+              else call flush_to_terminal;
+
+cleanup:
+   if temp_gotten          then call release_temp_segments_ ("unix_patch", temp_segs, code);
+   if pat_ptr ^= null ()   then call hcs_$terminate_noname (pat_ptr, code);
+   if old_ptr ^= null ()   then call hcs_$terminate_noname (old_ptr, code);
+   return;
+
+
+/* ==================================================================== *
+ *  Append a string to the accumulation buffer.                         *
+ * ==================================================================== */
+emit:
+   proc (str);
+   dcl str char (*);
+   dcl m   fixed bin (24);
+
+   m = length (str);
+   if m <= 0 then return;
+   if out_len + m > OUT_MAX then do;
+      call com_err_ (0, "unix_patch",
+         "Patched output exceeds one segment (^d characters).", OUT_MAX);
+      go to cleanup;
+   end;
+   substr (out_buf, out_len + 1, m) = substr (str, 1, m);
+   out_len = out_len + m;
+   end emit;
+
+
+/* ==================================================================== *
+ *  Describe the old line beginning at cur_off:                         *
+ *     tl = text length (no newline), fl = full length (with newline),  *
+ *     hn = "1"b if the line carries a trailing newline.                *
+ *  fl = 0 means there is no line there (old file exhausted).           *
+ * ==================================================================== */
+cur_old_extent:
+   proc (tl, fl, hn);
+   dcl (tl, fl) fixed bin (24);
+   dcl hn       bit (1);
+   dcl k        fixed bin (24);
+
+   if cur_off > old_len then do;  tl = 0;  fl = 0;  hn = "0"b;  return;  end;
+   k = index (substr (old_buf, cur_off), NL);
+   if k = 0 then do;  fl = old_len - cur_off + 1;  tl = fl;      hn = "0"b;  end;
+            else do;  fl = k;                       tl = k - 1;   hn = "1"b;  end;
+   end cur_old_extent;
+
+
+/* ==================================================================== *
+ *  Copy (emit) old lines until cur_line reaches target.                *
+ * ==================================================================== */
+advance_old_to:
+   proc (target);
+   dcl target   fixed bin (24);
+   dcl (tl, fl) fixed bin (24);
+   dcl hn       bit (1);
+
+   do while (cur_line < target);
+      call cur_old_extent (tl, fl, hn);
+      if fl = 0 then do;
+         call com_err_ (0, "unix_patch",
+            "Hunk ^d begins past the end of ^a.", hunk_no, rtrim (old_ent));
+         go to cleanup;
+      end;
+      call emit (substr (old_buf, cur_off, fl));
+      cur_off = cur_off + fl;
+      cur_line = cur_line + 1;
+   end;
+   end advance_old_to;
+
+
+/* ==================================================================== *
+ *  Copy every remaining old line to the output.                        *
+ * ==================================================================== */
+copy_rest_old:
+   proc;
+   dcl (tl, fl) fixed bin (24);
+   dcl hn       bit (1);
+
+   do while (cur_off <= old_len);
+      call cur_old_extent (tl, fl, hn);
+      call emit (substr (old_buf, cur_off, fl));
+      cur_off = cur_off + fl;
+      cur_line = cur_line + 1;
+   end;
+   end copy_rest_old;
+
+
+/* ==================================================================== *
+ *  Confirm the current old line matches a patch context/deletion line. *
+ * ==================================================================== */
+verify:
+   proc (old_text_len, ptext_off, ptext_len);
+   dcl (old_text_len, ptext_off, ptext_len) fixed bin (24);
+
+   if old_text_len ^= ptext_len then go to mismatch;
+   if old_text_len > 0 then
+      if substr (old_buf, cur_off, old_text_len) ^= substr (pat_buf, ptext_off, ptext_len)
+         then go to mismatch;
+   return;
+
+mismatch:
+   call com_err_ (0, "unix_patch",
+      "Hunk ^d does not match ^a at line ^d.", hunk_no, rtrim (old_ent), cur_line);
+   go to cleanup;
+   end verify;
+
+
+/* ==================================================================== *
+ *  Report an old file that ran out mid-hunk.                           *
+ * ==================================================================== */
+short_old:
+   proc;
+   call com_err_ (0, "unix_patch",
+      "Hunk ^d runs past the end of ^a at line ^d.", hunk_no, rtrim (old_ent), cur_line);
+   go to cleanup;
+   end short_old;
+
+
+/* ==================================================================== *
+ *  First character of the patch line at the given offset (blank if     *
+ *  there is no such line).  Used to spot a following "\ No newline".    *
+ * ==================================================================== */
+peek_char:
+   proc (off) returns (char (1));
+   dcl off fixed bin (24);
+   if off > pat_len then return (" ");
+   return (substr (pat_buf, off, 1));
+   end peek_char;
+
+
+/* ==================================================================== *
+ *  Pull the old starting line number out of "@@ -A,B +C,D @@".         *
+ * ==================================================================== */
+parse_oldstart:
+   proc (loff, llen, val);
+   dcl (loff, llen) fixed bin (24);
+   dcl val          fixed bin (24);
+   dcl (j, d)       fixed bin (24);
+   dcl c            char (1);
+   dcl scanning     bit (1);
+
+   j = index (substr (pat_buf, loff, llen), "-");   /* the old-side marker */
+   if j = 0 then do;  val = 0;  return;  end;
+   j = loff + j;                                     /* first digit after it */
+   val = 0;
+   scanning = "1"b;
+   do while (j <= loff + llen - 1 & scanning);
+      c = substr (pat_buf, j, 1);
+      d = index (DIGITS, c);
+      if d = 0 then scanning = "0"b;
+               else do;  val = val * 10 + (d - 1);  j = j + 1;  end;
+   end;
+   end parse_oldstart;
+
+
+/* ==================================================================== *
+ *  Write the accumulated text to the -output_file segment.             *
+ * ==================================================================== */
+flush_to_file:
+   proc;
+   dcl c2 fixed bin (35);
+
+   call hcs_$make_seg (of_dir, of_ent, "", RW_ACCESS, tgt_ptr, c2);
+   if tgt_ptr = null () then do;
+      call com_err_ (c2, "unix_patch", "Could not create output file ^a>^a",
+         rtrim (of_dir), rtrim (of_ent));
+      go to cleanup;
+   end;
+   call hcs_$truncate_seg (tgt_ptr, 0, c2);          /* clean slate */
+   if out_len > 0 then substr (tgt_seg, 1, out_len) = substr (out_buf, 1, out_len);
+   call hcs_$set_bc_seg (tgt_ptr, out_len * 9, c2);
+   call hcs_$truncate_seg (tgt_ptr, divide (out_len + 3, 4, 24, 0), c2);
+   call hcs_$terminate_noname (tgt_ptr, c2);
+   end flush_to_file;
+
+
+/* ==================================================================== *
+ *  Print the accumulated text on standard output, one line at a time.  *
+ * ==================================================================== */
+flush_to_terminal:
+   proc;
+   dcl (o, k, seglen) fixed bin (24);
+
+   o = 1;
+   do while (o <= out_len);
+      k = index (substr (out_buf, o, out_len - o + 1), NL);
+      if k = 0 then seglen = out_len - o + 1;    /* last line, no newline */
+               else seglen = k;                  /* include the newline   */
+      call ioa_$nnl ("^a", substr (out_buf, o, seglen));
+      o = o + seglen;
+   end;
+   end flush_to_terminal;
+
+end unix_patch;

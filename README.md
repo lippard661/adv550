@@ -38,4 +38,6 @@ adv550/
     ├── ADVENTURE.ACODE.diff  # Game text and logic database
     ├── exec.f.diff           # Game execution source
     ├── exec.i.diff           # Game execution include file
-    └── munge.f.diff          # Database compiler source
+    ├── munge.f.diff          # Database compiler source
+    ├── expand_fortran.pl1    # Multics program to preprocess fortran include
+    └── unix_patch.pl1        # Multics program to apply single patches
