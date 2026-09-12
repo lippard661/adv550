@@ -1,0 +1,341 @@
+/* ==================================================================== *
+ * expand_fortran                                                       *
+ *                                                                      *
+ *     expand_fortran  input_file  output_file                          *
+ *                                                                      *
+ * Copies a Fortran source segment to a new segment.  Every line of     *
+ * the form                                                             *
+ *                                                                      *
+ *            INCLUDE 'name'                                            *
+ *                                                                      *
+ * (any indentation, any letter case) is replaced by                    *
+ *                                                                      *
+ *            C*    BEGIN INCLUDE name                                  *
+ *            <verbatim contents of the segment "name">                 *
+ *            C*    END INCLUDE name                                    *
+ *                                                                      *
+ * The include segment is looked up in the same directory as the        *
+ * input file.  A source with no INCLUDE lines is copied unchanged.     *
+ * ==================================================================== */
+
+ /* Written 11 September 2026 by Claude Opus 4.8 at the direction of
+    Jim Lippard. */
+ /* Modified 12 September 2026 by Claude Opus 4.8 at the direction of
+    Jim Lippard to prompt for deletion of the output file if it already
+    exists before writing. It will stop and not allow override if the
+    safety switch is on. */
+
+expand_fortran:
+   proc options (main);
+
+   /* ---- hardcore gate entries ---------------------------------------- */
+   dcl hcs_$initiate_count   entry (char(*), char(*), char(*), fixed bin(24), fixed bin(2), ptr, fixed bin(35));
+   dcl hcs_$make_seg         entry (char(*), char(*), char(*), fixed bin(5), ptr, fixed bin(35));
+   dcl hcs_$truncate_seg     entry (ptr, fixed bin(24), fixed bin(35));
+   dcl hcs_$set_bc_seg       entry (ptr, fixed bin(24), fixed bin(35));
+   dcl hcs_$terminate_noname entry (ptr, fixed bin(35));
+   dcl hcs_$delentry_file    entry (char(*), char(*), fixed bin(35));
+
+   /* ---- command / error utilities ------------------------------------ */
+   dcl cu_$arg_ptr           entry (fixed bin, ptr, fixed bin(21), fixed bin(35));
+   dcl expand_path_          entry (ptr, fixed bin(21), ptr, ptr, fixed bin(35));
+   dcl com_err_              entry options (variable);
+   dcl command_query_        entry options (variable);
+
+   /* ---- error codes -------------------------------------------------- */
+   dcl error_table_$namedup  fixed bin (35) ext static;
+
+   /* ---- builtins ----------------------------------------------------- */
+   dcl (addr, byte, divide, index, length, null, rtrim, substr, translate)
+                             builtin;
+
+   /* ---- path resolution ---------------------------------------------- */
+   /* NB: a directory name can be up to 168 characters; expand_path_ will */
+   /* write that many, so these MUST be char(168) - char(32) overflows.   */
+   dcl (src_dir, tgt_dir)    char (168);
+   dcl (src_ent, tgt_ent)    char (32);
+
+   /* ---- segment pointers / sizes ------------------------------------- */
+   dcl (src_ptr, tgt_ptr, inc_ptr) ptr;
+   dcl (src_len, inc_len)          fixed bin (24);   /* char counts        */
+   dcl tgt_len                     fixed bin (24);   /* chars written so far*/
+
+   /* ---- scanners ----------------------------------------------------- */
+   dcl (i, dl, n, line_start, line_end) fixed bin (24);
+   dcl code                             fixed bin (35);
+   dcl (p1, p2)                         ptr;
+   dcl (l1, l2)                         fixed bin (21);
+   dcl overflow                         bit (1);
+
+   /* ---- memory overlays ---------------------------------------------- */
+   dcl src_buffer char (src_len) based (src_ptr);
+   dcl inc_buffer char (inc_len) based (inc_ptr);
+
+   /* The output is a PLAIN (non-varying) overlay of the segment, so the  */
+   /* very first character IS the first character of the file - there is  */
+   /* no hidden length word.                                              */
+   dcl tgt_seg    char (TGT_MAX) based (tgt_ptr);
+
+   /* ---- parsing helpers ---------------------------------------------- */
+   dcl line_slice char (256) varying;    /* only the head is needed       */
+   dcl inc_name   char (32)  varying;    /* varying => no trailing blanks  */
+
+   /* ---- constants ---------------------------------------------------- */
+   dcl TGT_MAX    fixed bin (24) int static options (constant) init (1044480);
+   dcl RW_ACCESS  fixed bin (5)  int static options (constant) init (01010b);
+   dcl UPPER      char (26) int static options (constant) init ("ABCDEFGHIJKLMNOPQRSTUVWXYZ");
+   dcl LOWER      char (26) int static options (constant) init ("abcdefghijklmnopqrstuvwxyz");
+   dcl FC_PREFIX  char (6)  int static options (constant) init ("C*    ");
+
+   /* control characters (byte() is not allowed in a static initializer)  */
+   dcl (NL, CR, HT) char (1);
+
+   /* ---- command_query_ interface (query_info.incl.pl1) --------------- */
+   dcl answer     char (8) varying;
+   dcl 1 query_info aligned,
+         2 version                  fixed bin,
+         2 yes_or_no_sw             bit (1) unaligned,
+         2 suppress_name_sw         bit (1) unaligned,
+         2 cp_escape_control        bit (2) unaligned,
+         2 suppress_spacing         bit (1) unaligned,
+         2 literal_sw               bit (1) unaligned,
+         2 prompt_after_explanation bit (1) unaligned,
+         2 mbz                      bit (29) unaligned,
+         2 status_code              fixed bin (35),
+         2 query_code               fixed bin (35);
+   dcl query_info_version_5 fixed bin int static options (constant) init (5);
+
+   /* ------------------------------------------------------------------- */
+   NL = byte (10);          /* new-line       */
+   CR = byte (13);          /* carriage return*/
+   HT = byte (9);           /* horizontal tab */
+   overflow = "0"b;
+
+   /* ---- argument 1 : input file -------------------------------------- */
+   call cu_$arg_ptr (1, p1, l1, code);
+   if code ^= 0 then do;
+      call com_err_ (code, "expand_fortran",
+         "Usage: expand_fortran input_file output_file");
+      return;
+   end;
+   call expand_path_ (p1, l1, addr (src_dir), addr (src_ent), code);
+   if code ^= 0 then go to path_error;
+
+   /* ---- argument 2 : output file ------------------------------------- */
+   call cu_$arg_ptr (2, p2, l2, code);
+   if code ^= 0 then do;
+      call com_err_ (code, "expand_fortran",
+         "Usage: expand_fortran input_file output_file");
+      return;
+   end;
+   call expand_path_ (p2, l2, addr (tgt_dir), addr (tgt_ent), code);
+   if code ^= 0 then go to path_error;
+
+   /* ---- map the input segment ---------------------------------------- */
+   call hcs_$initiate_count (src_dir, src_ent, "", src_len, 0, src_ptr, code);
+   if src_ptr = null () then do;
+      call com_err_ (code, "expand_fortran",
+         "Could not initiate source file ^a>^a", rtrim (src_dir), rtrim (src_ent));
+      return;
+   end;
+   src_len = divide (src_len, 9, 24, 0);       /* bit count -> char count  */
+
+   /* ---- create / map the output segment ------------------------------ */
+   call hcs_$make_seg (tgt_dir, tgt_ent, "", RW_ACCESS, tgt_ptr, code);
+   if tgt_ptr = null () then do;
+      call com_err_ (code, "expand_fortran",
+         "Could not create target segment ^a>^a", rtrim (tgt_dir), rtrim (tgt_ent));
+      go to clean_src;
+   end;
+
+   /* make_seg returns a valid pointer to an EXISTING segment together    */
+   /* with error_table_$namedup.  Announce it and let the user decide,    */
+   /* exactly as copy/move/delete do.  "Name duplication." is supplied    */
+   /* by command_query_ from status_code; we add only the question.       */
+   if code = error_table_$namedup then do;
+      query_info.version                  = query_info_version_5;
+      query_info.yes_or_no_sw             = "1"b;
+      query_info.suppress_name_sw         = "0"b;
+      query_info.cp_escape_control        = "00"b;
+      query_info.suppress_spacing         = "0"b;
+      query_info.literal_sw               = "0"b;
+      query_info.prompt_after_explanation = "0"b;
+      query_info.mbz                      = "0"b;
+      query_info.status_code              = error_table_$namedup;
+      query_info.query_code               = 0;
+      call command_query_ (addr (query_info), answer, "expand_fortran",
+         "Do you want to delete the old segment ^a>^a?",
+         rtrim (tgt_dir), rtrim (tgt_ent));
+
+      call hcs_$terminate_noname (tgt_ptr, code);   /* done with the old seg  */
+      if answer = "no" then go to clean_src;         /* leave it untouched     */
+
+      /* "yes": actually delete and recreate.  A fresh segment cannot      */
+      /* carry any residue of the old file (its pages are zero-filled as   */
+      /* it grows) and it takes its ACL from the directory's initial ACLs  */
+      /* -- the same net effect copy has when you answer this question.    */
+      call hcs_$delentry_file (tgt_dir, tgt_ent, code);
+      if code ^= 0 then do;
+         call com_err_ (code, "expand_fortran",
+            "Could not delete the old segment ^a>^a", rtrim (tgt_dir), rtrim (tgt_ent));
+         go to clean_src;
+      end;
+      call hcs_$make_seg (tgt_dir, tgt_ent, "", RW_ACCESS, tgt_ptr, code);
+      if tgt_ptr = null () then do;
+         call com_err_ (code, "expand_fortran",
+            "Could not create target segment ^a>^a", rtrim (tgt_dir), rtrim (tgt_ent));
+         go to clean_src;
+      end;
+   end;
+
+   tgt_len = 0;
+
+   /* ---- scan the source, line by line -------------------------------- */
+   line_start = 1;
+   do while (line_start <= src_len);
+
+      i = index (substr (src_buffer, line_start), NL);
+      if i = 0 then line_end = src_len;             /* last, unterminated  */
+                else line_end = line_start + i - 1; /* points at the NL    */
+
+      n = line_end - line_start + 1;                /* length incl. any NL */
+
+      dl = n;                                       /* head is enough to   */
+      if dl > 256 then dl = 256;                    /* recognise INCLUDE   */
+      line_slice = substr (src_buffer, line_start, dl);
+
+      if is_include (line_slice, inc_name)
+      then do;
+         /* -------- replace the INCLUDE line -------- */
+         call append (FC_PREFIX || "BEGIN INCLUDE " || inc_name || NL);
+
+         call hcs_$initiate_count (src_dir, (inc_name), "", inc_len, 0, inc_ptr, code);
+         if inc_ptr ^= null ()
+         then do;
+            inc_len = divide (inc_len, 9, 24, 0);
+            if inc_len > 0 then do;
+               call append (substr (inc_buffer, 1, inc_len));
+               /* guarantee the END marker starts on a fresh line */
+               if substr (inc_buffer, inc_len, 1) ^= NL then call append (NL);
+            end;
+            call hcs_$terminate_noname (inc_ptr, code);
+         end;
+         else call com_err_ (code, "expand_fortran",
+                 "Warning: skipping missing include file ^a", inc_name);
+
+         call append (FC_PREFIX || "END INCLUDE " || inc_name || NL);
+      end;
+      else
+         /* -------- ordinary line: copy verbatim -------- */
+         call append (substr (src_buffer, line_start, n));
+
+      line_start = line_end + 1;
+   end;
+
+   if overflow then
+      call com_err_ (0, "expand_fortran",
+         "Output truncated: result exceeds the maximum segment size.");
+
+   /* ---- record the length and release the unused pages --------------- */
+   call hcs_$set_bc_seg (tgt_ptr, tgt_len * 9, code);
+   call hcs_$truncate_seg (tgt_ptr, divide (tgt_len + 3, 4, 24, 0), code);
+   call hcs_$terminate_noname (tgt_ptr, code);
+
+clean_src:
+   call hcs_$terminate_noname (src_ptr, code);
+   return;
+
+path_error:
+   call com_err_ (code, "expand_fortran", "Path translation failure.");
+   return;
+
+
+/* ==================================================================== *
+ *  Append a string to the output segment, tracking the length by hand. *
+ * ==================================================================== */
+append:
+   proc (str);
+
+   dcl str char (*);
+   dcl m   fixed bin (24);
+
+   m = length (str);
+   if m <= 0 then return;
+
+   if tgt_len + m > TGT_MAX then do;      /* never run past the segment   */
+      overflow = "1"b;
+      m = TGT_MAX - tgt_len;
+   end;
+   if m <= 0 then return;
+
+   substr (tgt_seg, tgt_len + 1, m) = substr (str, 1, m);
+   tgt_len = tgt_len + m;
+
+   end append;
+
+
+/* ==================================================================== *
+ *  Recognise   [blanks] INCLUDE [blanks] 'name'   (case-insensitive).  *
+ *  Returns "1"b and sets NAME on a match; "0"b otherwise.              *
+ * ==================================================================== */
+is_include:
+   proc (line, name) returns (bit (1));
+
+   dcl line char (*) varying;         /* one source line (with any NL)    */
+   dcl name char (32) varying;        /* out: include entryname           */
+
+   dcl (p, q, ln) fixed bin (24);
+   dcl ch         char (1);
+   dcl more       bit (1);
+
+   ln = length (line);
+
+   /* drop a trailing new-line and/or carriage return */
+   more = "1"b;
+   do while (ln > 0 & more);
+      ch = substr (line, ln, 1);
+      if ch = NL | ch = CR then ln = ln - 1;
+                           else more = "0"b;
+   end;
+   if ln = 0 then return ("0"b);                /* blank line              */
+
+   /* a fixed-form comment can never be an INCLUDE statement */
+   ch = substr (line, 1, 1);
+   if ch = "C" | ch = "c" | ch = "*" | ch = "!" then return ("0"b);
+
+   /* skip the label / continuation columns (blanks or tabs) */
+   p = 1;
+   more = "1"b;
+   do while (p <= ln & more);
+      ch = substr (line, p, 1);
+      if ch = " " | ch = HT then p = p + 1;
+                            else more = "0"b;
+   end;
+
+   /* the keyword INCLUDE */
+   if ln - p + 1 < 7 then return ("0"b);
+   if translate (substr (line, p, 7), UPPER, LOWER) ^= "INCLUDE" then return ("0"b);
+   p = p + 7;
+
+   /* blanks between the keyword and the opening quote */
+   more = "1"b;
+   do while (p <= ln & more);
+      ch = substr (line, p, 1);
+      if ch = " " | ch = HT then p = p + 1;
+                            else more = "0"b;
+   end;
+
+   /* the file name must be quoted */
+   if p > ln then return ("0"b);
+   if substr (line, p, 1) ^= "'" then return ("0"b);
+   p = p + 1;
+
+   q = index (substr (line, p), "'");           /* offset of closing quote */
+   if q <= 1 then return ("0"b);                 /* none, or empty name     */
+
+   name = substr (line, p, q - 1);
+   return ("1"b);
+
+   end is_include;
+
+end expand_fortran;

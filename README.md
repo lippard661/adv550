@@ -17,22 +17,25 @@ which is where the OpenBSD port pulls the source code and database from.
 BSD license applies to my contributions to the content, Dave Platt retains copright
 to his game and code.
 
+Signing key for OpenBSD package can be verified with the signify public key
+https://www.discord.org/lippard/software/discord.org-2026-pkg.pub
+
 ---
 
 ## Directory Structure
 
 ```text
 adv550/
-├── Makefile                # OpenBSD port Makefile
-├── distinfo                # OpenBSD port checksums
-├── README.md               # This file
-├── patches/                # OpenBSD port unified diff patches
-├── pkg/                    # OpenBSD package packing list (PLIST) and DESCR
-└── Multics/                # Standalone files for running on Multics
-    ├── README.2026.Lippard # Notes on the Multics port and execution
-    ├── README.2003.Arnautov# Upstream historical notes
-    ├── ADVENTURE.ACODE     # Game text and logic database
-    ├── exec.f              # Game execution source
-    ├── exec.i              # Game execution include file
-    ├── munge.f             # Database compiler source
-    └── munge.i             # Database compiler include file
+├── Makefile                  # OpenBSD port Makefile
+├── distinfo                  # OpenBSD port checksums
+├── README.md                 # This file
+├── patches/                  # OpenBSD port unified diff patches
+├── pkg/                      # OpenBSD package packing list (PLIST) and DESCR
+├── adv550-20190711.tgz       # Legion of Dynamic Discord signed OpenBSD package
+└── Multics/                  # Standalone files for running on Multics
+    ├── README.2026.Lippard   # Notes on the Multics port and execution
+    ├── README.2003.Arnautov  # Upstream historical notes
+    ├── ADVENTURE.ACODE.diff  # Game text and logic database
+    ├── exec.f.diff           # Game execution source
+    ├── exec.i.diff           # Game execution include file
+    └── munge.f.diff          # Database compiler source
