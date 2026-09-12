@@ -1,0 +1,93 @@
+Multics port of Dave Platt's 550-point Adventure, which was written
+for CP-6 while Dave Platt worked for Honeywell in Los Angeles.
+
+This port is modified from Mike Arnautov's port, 10-11 September 2026,
+by Jim Lippard with assistance from Claude Opus 4.8.
+
+The main issues that had to be addressed were:
+(1) Multics Fortran 77 very strictly enforces ANSI standards
+on string bounds and arrays (and lacks INCLUDE, see below).
+(2) Multics has 36-bit words, not 32-bit, so some calculations
+had to be modified.
+(3) Multics has a persistent process, requiring manual resets
+in the munge database creator to avoid monotonic increase in
+database size on multiple runs in the same process; similarly
+we close the database files before open, ignoring errors, on
+each run of the game in case the player has broken out of
+a game. (Alternative manual fix is a new_proc; attempting to
+io_call close/detach file09 confuses fortran_io_.)
+
+This version will compile without errors and fixes one
+latent bug in exec.f from the version found at:
+
+https://github.com/Quuxplusone/Advent/tree/master/PLAT0550
+
+That's CHRPOS instead of CHARPOS at statement number 9998
+in subroutine SAY.
+
+If imported to Multics via method that wraps >80 char lines,
+main impact is ADVENTURE.ACODE, which will wrap these:
+
+2074: (102)          [A/Several] ball[/s] of searing flame [leaps/burst] out of your magic ring, [bounces/rebound]
+2075: (96)          off of the ground, and [melts/vaporize] the kni[fe/ves] before [it/they] can reach you!
+2544: (81)          gets cut to shreds by [his/their] nasty sharp kni[fe/ves]!  The tattered
+
+My ADVENTURE.ACODE also came in via copy_cards with an octal 032
+(CTL-Z) at end of file which should be removed.
+
+There shouldn't be any line length issues with the fortran code.
+
+Multics Fortran 77 (new_fortran) does not support INCLUDE files, so use
+expand_fortran as follows:
+
+   expand_fortran munge.f munge.fortran
+   expand_fortran exec.f exec.fortran
+
+This will include (many times!) the munge.i and exec.i include files
+in place, with comments around it to show you where they went.
+Note that expand_fortran currently does not check for the existence
+of the output file and will happily overwrite anything.
+
+Then compile:
+
+   new_fortran munge.fortran -ansi77 -table -card
+   new_fortran exec.fortran -ansi77 -table -card
+
+Build the game databases:
+
+   munge ADVENTURE.ACODE
+
+This port expects the resulting databases (ADVINITn.DAT, where n is 1 through 4)
+to be in >site>adv550_dir; if you want them somewhere else you only need to change
+the four filenames specified in exec.fortran.
+
+Finally, rename the exec binary to adv550:
+
+   rn exec adv550
+
+and put it wherever you want the executable to live.
+
+
+NOTE:  munge.f contains this code in FUNCTION MASH that is not
+ideal:
+
+      IF (J4 .GT. 2147483647 .OR. J4 .LT. -2147483648) THEN
+          J4 = MOD(J4, 2147483647)
+      ENDIF      
+
+Alternatives to try are:
+
+C     Replicate 32-bit signed wraparound to avoid 36-bit overflow trap,
+C     matching the original algorithm's overflow behavior.
+      IF (J4 .GE. 2147483648) J4 = J4 - 4294967296
+      IF (J4 .LT. -2147483648) J4 = J4 + 4294967296
+
+and:
+
+20    MASH = MOD(J4 / 65536, 65536)
+      IF (MASH.LT.0) MASH=-MASH
+
+But it works as is, and I plan to try out these other options
+later. On OpenBSD, munge produces a vocabulary size of 435 and
+on Multics it produces a vocabulary size of 436 and I think this
+might be the root of it.

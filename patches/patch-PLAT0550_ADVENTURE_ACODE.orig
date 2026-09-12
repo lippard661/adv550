@@ -1,0 +1,8 @@
+Index: PLAT0550/ADVENTURE.ACODE
+--- PLAT0550/ADVENTURE.ACODE.orig
++++ PLAT0550/ADVENTURE.ACODE
+@@ -9982,4 +9982,3 @@ REPEAT
+             FIN
+          FIN
+          QUIT
+-
