@@ -1,0 +1,294 @@
+--- exec.f.orig	Sat Sep 12 07:14:10 2026
++++ exec.f	Sat Sep 12 07:15:40 2026
+@@ -3,6 +3,9 @@
+ C*    Optimised for Prime as version 09.02 29 Mar 1989, by Mike Arnautov.
+ C*    Removed Prime optimisation and converted for use with g77,
+ C*                                       Mike Arnautov, 19 Jan 2003.
++C*    Modified to compile on Multics using:
++C*       new_fortran exec.fortran -ansi77 -table -card
++C*        Jim Lippard, 10 September 2026
+ C
+       INCLUDE 'exec.i'
+       INTEGER*4 KEY
+@@ -71,9 +74,10 @@
+       INTEGER*4 FUNCTION CLASS(EDITKEY)
+       INCLUDE 'exec.i'
+       INTEGER*4 EVAL
+-      INTEGER*2 BITPOS(2,16)
++C     JJL remove BITPOS and EQUIVALENCE      
++C     INTEGER*2 BITPOS(2,16)
+       INTEGER*4 LBITPS(16)
+-      EQUIVALENCE (BITPOS, LBITPS)
++C     EQUIVALENCE (BITPOS, LBITPS)
+       DATA LBITPS/1,2,4,8,16,32,64,128,256,512,1024,2048,4096,8192,
+      +            16384,32768/
+       CLASS = EDITKEY / 1000
+@@ -121,8 +125,11 @@
+       RETURN
+ 2300  BITVAL = PLACEBIT(INDEX)
+       RETURN
+-2400  BITVAL = BITPOS(2, ID + 1)
+-      IF (BITVAL .EQ. 0) BITVAL = BITPOS(1, ID + 1)
++C     JJL 36-bit word fix
++C     BITVAL = BITPOS(2, ID + 1)      
++2400  BITVAL = LBITPS(ID + 1)
++C     IF (BITVAL .EQ. 0) BITVAL = BITPOS(1, ID + 1)
++C     JJL END      
+       RETURN
+ C
+       ENTRY REF(ID)
+@@ -148,6 +155,8 @@
+ C*
+       SUBROUTINE COMMAND
+       INCLUDE 'exec.i'
++C     JJL add ITEMP_BIT      
++      INTEGER*4 ITEMP_BIT
+       CHARACTER*15 Z_HOLDARG
+       SAVE HOLDARG,Z_HOLDARG
+       LINELEN = 0
+@@ -184,7 +193,12 @@
+           Z_ARG(1)    = Z_HOLDARG
+           LINELEN     = 2
+           ENDIF
+-110   CALL SETBIT(STATUS, AND(BITVAL(STATUS), NOT(PLSCLRFY)))
++C     JJL change for 110 CALL       
++C     CALL SETBIT(STATUS, AND(BITVAL(STATUS), NOT(PLSCLRFY)))
++110   ITEMP_BIT = AND(BITVAL(STATUS), NOT(PLSCLRFY))
++      CALL SETBIT(STATUS, ITEMP_BIT)
++C     JJL END          
++          
+       I = CLASS(LINEWORD(1))
+       IF (LINELEN .EQ. 2 .AND.
+      +    CLASS(LINEWORD(2)) .EQ. VERB .AND. I .NE. VERB) THEN
+@@ -206,12 +220,22 @@
+       CALL SETVAL(STATUS, LINELEN)
+       IF (LINELEN .EQ. 0) GOTO 999
+       I = CLASS(LINEWORD(1))
+-      IF (I .EQ. VERB)
+-     + CALL SETBIT(STATUS, OR(BITVAL(STATUS), XVERB))
+-      IF (I .EQ. OBJECT)
+-     + CALL SETBIT(STATUS, OR(BITVAL(STATUS), XOBJECT))
+-      IF (I .EQ. PLACE)
+-     + CALL SETBIT(STATUS, OR(BITVAL(STATUS), XPLACE))
++C     JJL add ITEMP_BIT trick
++      IF (I .EQ. VERB) THEN
++          ITEMP_BIT = OR(BITVAL(STATUS), XVERB)
++          CALL SETBIT(STATUS, ITEMP_BIT)
++      ENDIF
++
++      IF (I .EQ. OBJECT) THEN
++          ITEMP_BIT = OR(BITVAL(STATUS), XOBJECT)
++          CALL SETBIT(STATUS, ITEMP_BIT)
++      ENDIF
++
++      IF (I .EQ. PLACE) THEN
++          ITEMP_BIT = OR(BITVAL(STATUS), XPLACE)
++          CALL SETBIT(STATUS, ITEMP_BIT)
++      ENDIF
++C      JJL END       
+ 999   CONTINUE
+       RETURN
+       END
+@@ -342,6 +366,8 @@
+ C*
+       SUBROUTINE PROCESS(RECNO, JUMP)
+       INCLUDE 'exec.i'
++C     JJL addition of ITEMP_BIT
++      INTEGER*4 ITEMP_BIT
+       INTEGER*4 RECNO, POSN
+       INTEGER*4 EVAL
+       CHARACTER*1 Z_RESP
+@@ -541,7 +567,11 @@
+       BP=BP+1
+       IF (SKIPFLAG.GT.0) GOTO 1200
+       CALL MOVEOBJ(REF(WORD1), INHAND)
+-      CALL SETBIT(STATUS, OR(BITVAL(STATUS), JUGGLED))
++C     JJL ITEMP_BIT trick
++C     CALL SETBIT(STATUS, OR(BITVAL(STATUS), JUGGLED))
++      ITEMP_BIT = OR(BITVAL(STATUS), JUGGLED)
++      CALL SETBIT(STATUS, ITEMP_BIT)
++C     JJL END
+       I = EVAL(REF(WORD1))
+       IF (I .LT. 0) CALL SETVAL(REF(WORD1), -1 - I)
+       GOTO 1200
+@@ -553,7 +583,11 @@
+       BP=BP+1
+       IF (SKIPFLAG.GT.0) GOTO 1200
+       CALL MOVEOBJ(REF(WORD1), EVAL(HERE))
+-      CALL SETBIT(STATUS, OR(BITVAL(STATUS), JUGGLED))
++C     JJL ITEMP_BIT trick
++C     CALL SETBIT(STATUS, OR(BITVAL(STATUS), JUGGLED))
++      ITEMP_BIT = OR(BITVAL(STATUS), JUGGLED)
++      CALL SETBIT(STATUS, ITEMP_BIT)
++C     JJL END      
+       GOTO 1200
+ C
+ C     "APPORT"
+@@ -564,7 +598,11 @@
+       BP=BP+2
+       IF (SKIPFLAG.GT.0) GOTO 1200
+       CALL MOVEOBJ(REF(WORD1), REF(WORD2))
+-      CALL SETBIT(STATUS, OR(BITVAL(STATUS), JUGGLED))
++C     JJL ITEMP_BIT trick
++C     CALL SETBIT(STATUS, OR(BITVAL(STATUS), JUGGLED))
++      ITEMP_BIT = OR(BITVAL(STATUS), JUGGLED)
++      CALL SETBIT(STATUS, ITEMP_BIT)
++C     JJL END     
+       GOTO 1200
+ C
+ C     "SET"
+@@ -609,7 +647,11 @@
+       CALL SETBIT(HERE, BITVAL(REF(WORD1)))
+       CALL SETVAL(THERE, I)
+       CALL SETBIT(THERE, J)
+-      CALL SETBIT(STATUS, OR(BITVAL(STATUS), MOVED))
++C     JJL ITEMP_BIT trick
++C     CALL SETBIT(STATUS, OR(BITVAL(STATUS), MOVED))
++      ITEMP_BIT = OR(BITVAL(STATUS), MOVED)
++      CALL SETBIT(STATUS, ITEMP_BIT)
++C     JJL END     
+       GOTO 1200
+ C
+ C     "MOVE"
+@@ -628,7 +670,11 @@
+       CALL SETBIT(HERE, BITVAL(REF(WORD2)))
+       CALL SETVAL(THERE, I)
+       CALL SETBIT(THERE, J)
+-      CALL SETBIT(STATUS, OR(BITVAL(STATUS), MOVED))
++C     JJL ITEMP_BIT trick
++C     CALL SETBIT(STATUS, OR(BITVAL(STATUS), MOVED))
++      ITEMP_BIT = OR(BITVAL(STATUS), MOVED)
++      CALL SETBIT(STATUS, ITEMP_BIT)
++C     JJL END     
+       RETURN
+ C
+ C     "CALL"
+@@ -758,7 +804,11 @@
+       WORD2=BUFFER(BP+1)
+       BP=BP+2
+       IF (SKIPFLAG.GT.0) GOTO 1200
+-      CALL SETBIT(WORD1,OR(BITVAL(WORD1),BITVAL(WORD2)))
++C     JJL ITEMP_BIT trick
++C     CALL SETBIT(WORD1,OR(BITVAL(WORD1),BITVAL(WORD2)))
++      ITEMP_BIT = OR(BITVAL(WORD1), BITVAL(WORD2))
++      CALL SETBIT(WORD1,ITEMP_BIT)
++C     JJL END     
+       GOTO 1200
+ C
+ C     "BICLEAR"
+@@ -768,7 +818,11 @@
+       WORD2=BUFFER(BP+1)
+       BP=BP+2
+       IF (SKIPFLAG.GT.0) GOTO 1200
+-      CALL SETBIT(WORD1,AND(BITVAL(WORD1),NOT(BITVAL(WORD2))))
++C     JJL ITEMP_BIT trick
++C     CALL SETBIT(WORD1,AND(BITVAL(WORD1),NOT(BITVAL(WORD2))))
++      ITEMP_BIT = AND(BITVAL(WORD1),NOT(BITVAL(WORD2)))
++      CALL SETBIT(WORD1,ITEMP_BIT)
++C     JJL END
+       GOTO 1200
+ C
+ C     "ITOBJ"
+@@ -987,7 +1041,11 @@
+       CALL SETBIT(HERE, BITVAL(REF(WORD2)))
+       CALL SETVAL(THERE, I)
+       CALL SETBIT(THERE, J)
+-      CALL SETBIT(STATUS, OR(BITVAL(STATUS), MOVED))
++C     JJL ITEMP_BIT trick      
++C     CALL SETBIT(STATUS, OR(BITVAL(STATUS), MOVED))
++      ITEMP_BIT = OR(BITVAL(STATUS), MOVED)
++      CALL SETBIT(STATUS, ITEMP_BIT)
++C     JJL END
+       CALL SAY(REF(WORD3))
+       RETURN
+ C
+@@ -1183,10 +1241,25 @@
+       Z_CODE = Z_CODE(2:WORDSIZE)
+       GOTO 520
+ 530   CONTINUE
+-600   Z_SUB = Z_TEXT(1:I-1) // Z_CODE
++C     JJL change for string bounds
++600   IF (I .LE. 1) THEN
++        Z_SUB = Z_CODE
++      ELSE
++        Z_SUB = Z_TEXT(1:I-1) // Z_CODE
++      ENDIF 
++C     Z_SUB = Z_TEXT(1:I-1) // Z_CODE
+       J = I + 15
++      IF (J .GT. LEN(Z_SUB)) J = LEN(Z_SUB)
++      IF (J .LT. 1) J = 1
++C     JJL END      
+ 611   IF (Z_SUB(J:J).NE.' ')GOTO 610
+       J = J - 1
++C     JJL infinite loop protection for Multics
++      IF (J .LT. 1) THEN
++         J = 1
++         GOTO 610
++      ENDIF
++C     JJL END
+       GOTO 611
+ 610   CONTINUE
+       Z_SUB = Z_SUB(1:J) // Z_TEXT(I+1:140)
+@@ -1237,7 +1310,7 @@
+       GOTO 200
+ 9997  PRINT '('' Ok.'')'
+       GOTO 9999
+-9998  IF (CHRPOS .EQ. 0) THEN
++9998  IF (CHARPOS .EQ. 0) THEN
+          PRINT '('' '')'
+       ELSE
+          CALL WRITETEXT
+@@ -1499,8 +1572,13 @@
+       IF (CODE.EQ.0) GOTO 10
+       CLOSE (UNIT=DBI)
+ C*
+-      OPEN(UNIT=DBT,STATUS='OLD',FILE='ADVINIT2.DAT',
+-     +     ACCESS='DIRECT',RECL=120)
++C     JJL close before open in case this is a second run
++C     in the same process
++      CLOSE(UNIT=DBT,ERR=40)
++C     remove RECL=120 for Multics, add line number
++40    OPEN(UNIT=DBT,STATUS='OLD',FILE='ADVINIT2.DAT',
++     +     ACCESS='DIRECT')
++C     JJL END      
+ C*
+       OPEN(UNIT=DBI,STATUS='OLD',FILE='ADVINIT3.DAT',
+      +     FORM='UNFORMATTED')
+@@ -1580,7 +1658,15 @@
+       END
+ C*
+ C*********************************************************************
++C*    JJL Added function for Multics, which lacks it.
++      INTEGER*4 FUNCTION NOT(I)
++      INTEGER*4 I
++      NOT = COMPL(I)
++      RETURN
++      END      
+ C*
++C*********************************************************************
++C*
+       SUBROUTINE APPEND(Z_STRING)
+ C*
+       INCLUDE 'exec.i'
+@@ -1590,9 +1676,19 @@
+ C*
+       IF (CHARPOS .GT. 140) RETURN
+       LENGTH = NLEN(Z_STRING, 140)
+-      IF (CHARPOS + LENGTH .GT. 141) LENGTH = 141 - CHARPOS
+-      Z_OUTLINE(CHARPOS:) = Z_STRING(1:LENGTH)
++C     JJL Prevent empty or inverted substring slices, need to verify
++C     doesn't prevent intended blanking of Z_OUTLINE
++      IF (LENGTH .LE. 0) RETURN
++C     IF (CHARPOS + LENGTH .GT. 141) LENGTH = 141 - CHARPOS
++      IF (CHARPOS + LENGTH .GT. 140) LENGTH = 140 - CHARPOS + 1
++      IF (LENGTH .LE. 0) RETURN
++      IF (CHARPOS .GT. 140) RETURN
++C     Z_OUTLINE(CHARPOS:) = Z_STRING(1:LENGTH)
++      Z_OUTLINE(CHARPOS:CHARPOS+LENGTH-1) = Z_STRING(1:LENGTH)
++C     next line in original
+       CHARPOS = CHARPOS + LENGTH
++      IF (CHARPOS .GT. 140) CHARPOS = 140
++C     JJL END
+       RETURN
+       END
+ C*

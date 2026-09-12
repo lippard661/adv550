@@ -4,6 +4,23 @@ for CP-6 while Dave Platt worked for Honeywell in Los Angeles.
 This port is modified from Mike Arnautov's port, 10-11 September 2026,
 by Jim Lippard with assistance from Claude Opus 4.8.
 
+This directory contains Unix unified diffs from the files in
+
+https://github.com/Quuxplusone/Advent/tree/master/PLAT0550
+
+which will make it compile and run on Multics. The files required
+from that distribution are ADVENTURE.ACODE, munge.f, munge.i,
+exec.f, and exec.i.  The munge.i include file requires no
+changes.
+
+To create the Multics versions on a Unix system,
+
+patch oldfile < newfile.diff
+
+or
+
+patch oldfile -i newfile.diff
+
 The main issues that had to be addressed were:
 (1) Multics Fortran 77 very strictly enforces ANSI standards
 on string bounds and arrays (and lacks INCLUDE, see below).
@@ -18,12 +35,11 @@ a game. (Alternative manual fix is a new_proc; attempting to
 io_call close/detach file09 confuses fortran_io_.)
 
 This version will compile without errors and fixes one
-latent bug in exec.f from the version found at:
-
-https://github.com/Quuxplusone/Advent/tree/master/PLAT0550
-
-That's CHRPOS instead of CHARPOS at statement number 9998
-in subroutine SAY.
+latent bug in exec.f from the version above: CHRPOS
+at statement number 9998 in the subroutine SAY should
+be CHARPOS. (This has no impact on the game and appears
+to be dead code, but it's necessary on Multics if you
+want a warning-free compilation.)
 
 If imported to Multics via method that wraps >80 char lines,
 main impact is ADVENTURE.ACODE, which will wrap these:

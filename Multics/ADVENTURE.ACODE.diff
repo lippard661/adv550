@@ -1,0 +1,8 @@
+--- ADVENTURE.ACODE.orig	Sat Sep 12 07:13:15 2026
++++ ADVENTURE.ACODE	Sat Sep 12 07:15:51 2026
+@@ -9982,4 +9982,3 @@
+             FIN
+          FIN
+          QUIT
+-                                                    
+\ No newline at end of file
