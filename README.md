@@ -8,6 +8,12 @@ Dave Platt wrote this version of Adventure for Honeywell's CP-6, with the origin
 "munger" and game engine in PL6; this version is in Fortran 77 and there's another one out
 there in C.
 
+This is one of the many text Adventure variants that can be found at:
+
+https://github.com/Quuxplusone/Advent
+
+which is where the OpenBSD port pulls the source code and database from.
+
 ---
 
 ## Directory Structure
