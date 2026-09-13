@@ -215,8 +215,14 @@ unix_patch:
 
       /* isolate the current patch line (pline_len excludes the newline) */
       kk = index (substr (pat_buf, pat_off), NL);
-      if kk = 0 then do;  pline_len = pat_len - pat_off + 1;  pnext = pat_len + 1;  end;
-                else do;  pline_len = kk - 1;                 pnext = pat_off + kk;  end;
+      if kk = 0 then do;
+      	 pline_len = pat_len - pat_off + 1;
+	 pnext = pat_len + 1;
+      end;
+      else do;
+         pline_len = kk - 1;
+         pnext = pat_off + kk;
+      end;
 
       if pline_len >= 2 & substr (pat_buf, pat_off, 2) = "@@" then do;
          /* -------- hunk header -------- */
@@ -229,10 +235,16 @@ unix_patch:
       else if in_hunk then do;
          /* -------- hunk body -------- */
          if pline_len = 0 then pm = " ";      /* a blank line is empty context */
-                          else pm = substr (pat_buf, pat_off, 1);
+         else pm = substr (pat_buf, pat_off, 1);
 
-         if pline_len >= 1 then do;  ptxt_off = pat_off + 1;  ptxt_len = pline_len - 1;  end;
-                           else do;  ptxt_off = pat_off;      ptxt_len = 0;              end;
+         if pline_len >= 1 then do;
+	    ptxt_off = pat_off + 1;
+	    ptxt_len = pline_len - 1;
+	 end;
+         else do;
+	      ptxt_off = pat_off;
+	      ptxt_len = 0;
+         end;
 
          if pm = " " then do;                 /* context: verify, then copy old */
             call cur_old_extent (otl, ofl, onl);
@@ -322,10 +334,23 @@ cur_old_extent:
    dcl hn       bit (1);
    dcl k        fixed bin (24);
 
-   if cur_off > old_len then do;  tl = 0;  fl = 0;  hn = "0"b;  return;  end;
+   if cur_off > old_len then do;
+      tl = 0;
+      fl = 0;
+      hn = "0"b;
+      return;
+   end;
    k = index (substr (old_buf, cur_off), NL);
-   if k = 0 then do;  fl = old_len - cur_off + 1;  tl = fl;      hn = "0"b;  end;
-            else do;  fl = k;                       tl = k - 1;   hn = "1"b;  end;
+   if k = 0 then do;
+      fl = old_len - cur_off + 1;
+      tl = fl;
+      hn = "0"b;
+   end;
+   else do;
+   	fl = k;
+        tl = k - 1;
+	hn = "1"b;
+   end;
    end cur_old_extent;
 
 
@@ -424,7 +449,10 @@ parse_oldstart:
    dcl scanning     bit (1);
 
    j = index (substr (pat_buf, loff, llen), "-");   /* the old-side marker */
-   if j = 0 then do;  val = 0;  return;  end;
+   if j = 0 then do;
+      val = 0;
+      return;
+   end;
    j = loff + j;                                     /* first digit after it */
    val = 0;
    scanning = "1"b;
@@ -432,7 +460,10 @@ parse_oldstart:
       c = substr (pat_buf, j, 1);
       d = index (DIGITS, c);
       if d = 0 then scanning = "0"b;
-               else do;  val = val * 10 + (d - 1);  j = j + 1;  end;
+      else do;
+      	   val = val * 10 + (d - 1);
+	   j = j + 1;
+      end;
    end;
    end parse_oldstart;
 
