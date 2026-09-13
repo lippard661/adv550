@@ -27,12 +27,12 @@
  * match never leaves a partial output file behind.                     *
  * ==================================================================== */
 
-/* Written 12 September 2026 by Claude Opus 4.8 at the direction of
-   Jim Lippard. Minimal implementation to patch from output of
-   diff -u oldfile newfile >changes.diff
-   using oldfile and changes.diff, for a single file.
-   Usage: unix_patch oldfile changes.diff [-output_file/-of newfile]
-   will just print to the terminal if -of is not supplied. */
+< /* Written 12 September 2026 by Claude Opus 4.8 at the direction of
+<    Jim Lippard. Minimal implementation to patch from output of
+<    diff -u oldfile newfile >changes.diff
+<    using oldfile and changes.diff, for a single file.
+<    Usage: unix_patch oldfile changes.diff [-output_file/-of newfile]
+<    will just print to the terminal if -of is not supplied. */
 
 unix_patch:
    proc options (main);
@@ -262,6 +262,18 @@ unix_patch:
       /* else: preamble before the first hunk (--- / +++) -- skip */
 
       pat_off = pnext;
+   end;
+
+   /* A patch with no recognizable hunk header applies nothing.  Rather   */
+   /* than deliver a misleading identity copy of the input, fail the way   */
+   /* Unix patch does -- report it and write no output at all.            */
+   /* (The commonest cause on Multics is the two-at-sign header line being */
+   /*  eaten on input, since the at-sign is the line-kill character.)      */
+   if hunk_no = 0 then do;
+      call com_err_ (0, "unix_patch",
+         "No hunks found in ^a; nothing applied and no output written.  A unified-diff hunk header begins with two at-signs -- check that the patch reached Multics intact.",
+         rtrim (pat_ent));
+      go to cleanup;
    end;
 
    /* ---- copy whatever old text follows the last hunk ----------------- */
