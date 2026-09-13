@@ -1,5 +1,9 @@
 Multics port of Dave Platt's 550-point Adventure, which was written
-for CP-6 while Dave Platt worked for Honeywell in Los Angeles.
+for CP-6 while Dave Platt worked for Honeywell's Los Angeles
+Development Center (LADC), formerly the Xerox CP-V development
+team (see https://en.wikipedia.org/wiki/Honeywell_CP-6 and
+https://www.computerhistory.org/collections/catalog/102733957/ for
+background).
 
 This port is modified from Mike Arnautov's port, 10-11 September 2026,
 by Jim Lippard with assistance from Claude Opus 4.8.
@@ -13,13 +17,10 @@ from that distribution are ADVENTURE.ACODE, munge.f, munge.i,
 exec.f, and exec.i.  The munge.i include file requires no
 changes.
 
-To create the Multics versions on a Unix system,
-
-patch oldfile < newfile.diff
-
-or
-
-patch oldfile -i newfile.diff
+The Multics versions can be created on a Unix system using
+  patch oldfile <newfile.diff
+or by using the unix_patch.pl1 on Multics as:
+   unix_patch oldfile newfile.diff -of newfile
 
 The main issues that had to be addressed were:
 (1) Multics Fortran 77 very strictly enforces ANSI standards
@@ -64,7 +65,7 @@ in place, with comments around it to show you where they went.
 Note that expand_fortran currently does not check for the existence
 of the output file and will happily overwrite anything.
 
-Then compile:
+Then compile (new_fortran wants a .fortran suffix):
 
    new_fortran munge.fortran -ansi77 -table -card
    new_fortran exec.fortran -ansi77 -table -card
