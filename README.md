@@ -1,12 +1,19 @@
 # adv550
 
-This repository contains port files and source modifications for the **550-point Platt version of Colossal Cave Adventure** (originally written in Fortran and A-code). 
+This repository contains port files and source modifications for the **550-point Platt version of Colossal Cave Adventure** (originally written in Fortran IV and A-code). 
 
 It includes both an **OpenBSD port** infrastructure setup and a complete **Multics port** dataset.
 
-Dave Platt wrote this version of Adventure for Honeywell's CP-6, with the original database
-"munger" and game engine in PL6; this version is in Fortran 77 and there's another one out
-there in C.  It can also be played in the web browser at: https://quuxplusone.github.io/Advent/index-550.html
+Dave Platt wrote this version of Adventure for Honeywell's CP-V and
+then for CP-6, with the database "munger" and game engine in PL-6
+instead of Fortran; this version is derived from the Fortran IV
+version and is in Fortran 77 and there's another one also derived from
+the Fortran version that's in C. It can also be played in the web
+browser at: https://quuxplusone.github.io/Advent/index-550.html
+
+An ideal Multics version would be rewritten in PL/I following the PL-6
+code (especially the game engine) wherever possible, but this is
+unfortunately not that.
 
 This is one of the many text Adventure variants that can be found at:
 
