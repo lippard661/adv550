@@ -46,5 +46,10 @@ adv550/
     ├── exec.f.diff           # Game execution source
     ├── exec.i.diff           # Game execution include file
     ├── munge.f.diff          # Database compiler source
-    ├── expand_fortran.pl1    # Multics program to preprocess fortran include
-    └── unix_patch.pl1        # Multics program to apply single patches
+    └── expand_fortran.pl1    # Multics program to preprocess fortran include
+
+
+unix_patch.pl1, formerly in the Multics dir, is now here:
+https://github.com/lippard661/multics/tree/main/UnixOnMultics
+
+And will be in >aml, likely for Multics MR12.9 release.
