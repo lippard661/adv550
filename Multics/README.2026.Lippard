@@ -22,6 +22,9 @@ The Multics versions can be created on a Unix system using
 or by using the unix_patch.pl1 on Multics as:
    unix_patch oldfile newfile.diff -of newfile
 
+unix_patch can be found here: https://github.com/lippard661/multics/tree/main/UnixOnMultics
+and will be available in >aml likely for the Multics MR12.9 release.
+
 The main issues that had to be addressed were:
 (1) Multics Fortran 77 very strictly enforces ANSI standards
 on string bounds and arrays (and lacks INCLUDE, see below).
