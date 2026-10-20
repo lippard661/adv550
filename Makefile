@@ -14,7 +14,7 @@ HOMEPAGE =	https://github.com/Quuxplusone/Advent
 PERMIT_PACKAGE =	Yes
 
 # Require Fortran compiler from GCC
-BUILD_DEPENDS  =        lang/gcc/15,-f95 \
+BUILD_DEPENDS  =        lang/gcc/16,-f95 \
 			devel/gmake
 
 USE_GMAKE      =        Yes
