@@ -10,7 +10,46 @@ Index: PLAT0550/exec.f
           PRINT '('' '')'
        ELSE
           CALL WRITETEXT
-@@ -1492,18 +1492,19 @@ C*
+@@ -1383,7 +1383,10 @@ C*
+       INTEGER*2 NAMELEN
+       SAVE Z_KEY
+ C*
+-      MAXREC = 13 + 3*NOBJ + 2*NVARS + NPLACE
++C     RECL removed: these units are sequential, so RECL is a maximum
++C     record length, not a record size.  MAXREC counted words (right on
++C     the Prime); gfortran and Multics fortran_io_ read RECL in
++C     characters, ~4x too small, failing the second WRITE.
+       IF (WORD1.GT.999) WORD1=EVAL(WORD1)
+       LINELEN = EVAL(STATUS)
+ 8     GOTO (100,200,300,400,500,600,700,800,900),WORD1
+@@ -1401,7 +1404,7 @@ C
+       END IF
+       NAMELEN=INDEX(Z_KEY, ' ')-1
+       IF (NAMELEN.LT.0.OR.NAMELEN.GT.12) NAMELEN=12
+-      OPEN (UNIT=FREEZER, FILE=Z_KEY(1:NAMELEN), RECL=MAXREC,
++      OPEN (UNIT=FREEZER, FILE=Z_KEY(1:NAMELEN),
+      +  STATUS='UNKNOWN', ERR=150, FORM='UNFORMATTED')
+       WRITE (UNIT=FREEZER) NOBJ,NVARS,NPLACE
+       WRITE (UNIT=FREEZER)
+@@ -1426,7 +1429,7 @@ C
+       END IF
+       NAMELEN=INDEX(Z_KEY, ' ')-1
+       IF (NAMELEN.LT.0.OR.NAMELEN.GT.12) NAMELEN=12
+-      OPEN (UNIT=FREEZER, FILE=Z_KEY(1:NAMELEN), RECL=MAXREC,
++      OPEN (UNIT=FREEZER, FILE=Z_KEY(1:NAMELEN),
+      +  STATUS='OLD', FORM='UNFORMATTED', ERR=220)
+       READ (UNIT=FREEZER) ROBJ,RVARS,RPLACE
+       IF (NOBJ.NE.ROBJ.OR.NVARS.NE.RVARS.OR.NPLACE.NE.RPLACE) GOTO 210
+@@ -1443,7 +1446,7 @@ C
+ C     EXEC 3 - delete dumped game. (This only happens after a restore,
+ C              so Z_FULLKEY has a well defined value).
+ C
+-300   OPEN (UNIT=FREEZER, FILE=Z_KEY, RECL=MAXREC,
++300   OPEN (UNIT=FREEZER, FILE=Z_KEY,
+      +  STATUS='OLD', FORM='UNFORMATTED', ERR=9999)
+       CLOSE (UNIT=FREEZER,STATUS='DELETE')
+       CALL SETVAL(WORD2, 0)
+@@ -1492,18 +1495,19 @@ C*
        INTEGER*4 POINT,I4
        INTEGER*2 LEN
  C*
@@ -36,7 +75,7 @@ Index: PLAT0550/exec.f
  
        READ(DBI)NUMKEYS
        READ(DBI)(EKEYSBF(I),I=1,2*NUMKEYS)
-@@ -1514,8 +1515,8 @@ C*
+@@ -1514,8 +1518,8 @@ C*
  C*
  50    CLOSE(UNIT=DBI)
  C*

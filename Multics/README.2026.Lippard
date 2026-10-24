@@ -45,6 +45,24 @@ be CHARPOS. (This has no impact on the game and appears
 to be dead code, but it's necessary on Multics if you
 want a warning-free compilation.)
 
+It also fixes a second latent bug, this one affecting the SAVE
+command. The three OPEN statements for the save file (unit 12,
+FREEZER) in subroutine SPECIAL specified RECL=MAXREC, where
+MAXREC = 13 + 3*NOBJ + 2*NVARS + NPLACE was a word count carried
+over from the Prime version. Those units are sequential, not
+direct-access, so RECL is only a maximum record length and is not
+required at all; both Multics fortran_io_ and gfortran interpret
+it in characters, making it roughly four times too small for the
+second WRITE. Saving a game therefore failed with "Record is too
+long" on Multics and "I/O past end of record" under gfortran.
+RECL has been dropped from all three OPENs and the now-unused
+MAXREC assignment removed. The same fix is in the OpenBSD port
+patch, since it is not platform-specific.
+
+Note that RESTORE would have hit the same limit on the read, so
+any save file produced before this fix should be deleted rather
+than restored.
+
 If imported to Multics via method that wraps >80 char lines,
 main impact is ADVENTURE.ACODE, which will wrap these:
 
