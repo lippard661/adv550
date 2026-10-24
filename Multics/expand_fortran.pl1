@@ -118,7 +118,10 @@ expand_fortran:
          2 prompt_after_explanation bit (1) unaligned,
          2 mbz                      bit (29) unaligned,
          2 status_code              fixed bin (35),
-         2 query_code               fixed bin (35);
+         2 query_code               fixed bin (35),
+         2 question_iocbp           ptr,
+         2 answer_iocbp             ptr,
+         2 repeat_time              fixed bin (71);
    dcl query_info_version_5 fixed bin int static
                             options (constant) init (5);
 
@@ -189,6 +192,16 @@ expand_fortran:
       query_info.mbz                      = "0"b;
       query_info.status_code              = error_table_$namedup;
       query_info.query_code               = 0;
+      /* These three MUST be set: command_query_ reads them for
+       * version 5, and null iocb pointers mean "use the default
+       * I/O switches".  Leaving them out made command_query_
+       * read uninitialized storage past the end of the
+       * structure and fail with "The supplied pointer does not
+       * point to a valid IOCB.  Writing question."
+       */
+      query_info.question_iocbp           = null ();
+      query_info.answer_iocbp             = null ();
+      query_info.repeat_time              = 0;
       call command_query_ (addr (query_info), answer,
          "expand_fortran",
          "Do you want to delete the old segment ^a>^a?",

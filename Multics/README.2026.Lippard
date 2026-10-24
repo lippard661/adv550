@@ -83,8 +83,17 @@ expand_fortran as follows:
 
 This will include (many times!) the munge.i and exec.i include files
 in place, with comments around it to show you where they went.
-Note that expand_fortran currently does not check for the existence
-of the output file and will happily overwrite anything.
+
+expand_fortran looks up the include segment in the same directory as
+the input file, so exec.i must be sitting next to exec.f (and munge.i
+next to munge.f) or you will get a "skipping missing include file"
+warning and an output segment with no declarations in it.
+
+If the output segment already exists, expand_fortran reports the name
+duplication and asks whether to delete the old one, the way copy
+does. (An earlier version of this note said it overwrote without
+asking; that has not been true since the name-duplication query was
+added.)
 
 Then compile (new_fortran wants a .fortran suffix):
 
