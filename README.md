@@ -24,8 +24,11 @@ which is where the OpenBSD port pulls the source code and database from.
 BSD license applies to my contributions to the content, Dave Platt retains copright
 to his game and code.
 
+An OpenBSD package signed with the Legion of Dynamic Discord public key
+is in https://discord.org/lippard/software/OpenBSD-packages/
+
 Signing key for OpenBSD package can be verified with the signify public key
-https://www.discord.org/lippard/software/discord.org-2026-pkg.pub
+https://discord.org/lippard/software/discord.org-2026-pkg.pub
 
 ---
 
