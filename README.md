@@ -2,7 +2,8 @@
 
 This repository contains port files and source modifications for the **550-point Platt version of Colossal Cave Adventure** (originally written in Fortran IV and A-code). 
 
-It includes both an **OpenBSD port** infrastructure setup and a complete **Multics port** dataset.
+It includes both an **OpenBSD port** infrastructure setup and a complete **Multics port** dataset. The Multics
+version is in >aml on Multics MR12.9, released in November 2026.
 
 Dave Platt wrote this version of Adventure for Honeywell's CP-V and
 then for CP-6, with the database "munger" and game engine in PL-6
